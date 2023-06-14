@@ -5,6 +5,7 @@ import numpy as np
 
 
 def farnebacks(video, device):
+    FRAME_SKIP = 5
 
     # init dict to track time for every stage at each iteration
     timers = {
@@ -22,7 +23,7 @@ def farnebacks(video, device):
     fps = cap.get(cv2.CAP_PROP_FPS)
 
     # get total number of video frames
-    num_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # read the first frame
     ret, previous_frame = cap.read()
@@ -45,10 +46,10 @@ def farnebacks(video, device):
             # set saturation to 1
             hsv[..., 1] = 1.0
 
-            # Initialize total movement counter
-            total_movement = 0
+            for i in range(num_frames):
 
-            while True:
+                if not i%5==0: continue
+
                 # start full pipeline timer
                 start_full_time = time.time()
 
@@ -98,15 +99,24 @@ def farnebacks(video, device):
                 # start post-process timer
                 start_post_time = time.time()
 
-                # Calculate the magnitude of optical flow vectors
-                magnitude = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
+                # convert from cartesian to polar coordinates to get magnitude and angle
+                magnitude, angle = cv2.cartToPolar(
+                    flow[..., 0], flow[..., 1], angleInDegrees=True,
+                )
 
-                # Calculate the average magnitude for this pair of frames
-                average_magnitude = np.mean(magnitude)
-                print("Average Magnitude:", average_magnitude)
+                # set hue according to the angle of optical flow
+                hsv[..., 0] = angle * ((1 / 360.0) * (180 / 255.0))
 
-                # Accumulate the total movement
-                total_movement += average_magnitude
+                # set value according to the normalized magnitude of optical flow
+                hsv[..., 2] = cv2.normalize(
+                    magnitude, None, 0.0, 1.0, cv2.NORM_MINMAX, -1,
+                )
+
+                # multiply each pixel value to 255
+                hsv_8u = np.uint8(hsv * 255.0)
+
+                # convert hsv to bgr
+                bgr = cv2.cvtColor(hsv_8u, cv2.COLOR_HSV2BGR)
 
                 # update previous_frame value
                 previous_frame = current_frame
@@ -125,6 +135,7 @@ def farnebacks(video, device):
 
                 # visualization
                 cv2.imshow("original", frame)
+                cv2.imshow("result", bgr)
                 k = cv2.waitKey(1)
                 if k == 27:
                     break
@@ -134,7 +145,7 @@ def farnebacks(video, device):
         # proceed if frame reading was successful
         if ret:
             # resize frame
-            frame = cv2.resize(previous_frame, (960, 540))
+            frame = cv2.resize(previous_frame, (0, 0), fx=0.7, fy=0.7)
 
             # upload resized frame to GPU
             gpu_frame = cv2.cuda_GpuMat()
@@ -158,7 +169,9 @@ def farnebacks(video, device):
             # set saturation to 1
             gpu_s.upload(np.ones_like(previous_frame, np.float32))
 
-            while True:
+            for i in range(num_frames):
+
+                if not i%5==0: continue
                 # start full pipeline timer
                 start_full_time = time.time()
 
@@ -185,7 +198,7 @@ def farnebacks(video, device):
                 start_pre_time = time.time()
 
                 # resize frame
-                gpu_frame = cv2.cuda.resize(gpu_frame, (960, 540))
+                gpu_frame = cv2.cuda.resize(gpu_frame, (0, 0), fx=0.7, fy=0.7)
 
                 # convert to gray
                 gpu_current = cv2.cuda.cvtColor(gpu_frame, cv2.COLOR_BGR2GRAY)
@@ -298,4 +311,4 @@ def farnebacks(video, device):
 
 
 if __name__ == "__main__":
-    farnebacks('video/boat.mp4','cpu')
+    farnebacks('../IMG_6655.MP4','gpu')
