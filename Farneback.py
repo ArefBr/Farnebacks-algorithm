@@ -99,25 +99,16 @@ def farnebacks(video, device):
                 # start post-process timer
                 start_post_time = time.time()
 
-                # convert from cartesian to polar coordinates to get magnitude and angle
-                magnitude, angle = cv2.cartToPolar(
-                    flow[..., 0], flow[..., 1], angleInDegrees=True,
-                )
+                # Calculate the magnitude of optical flow vectors
+                magnitude = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
 
-                # set hue according to the angle of optical flow
-                hsv[..., 0] = angle * ((1 / 360.0) * (180 / 255.0))
+                # Calculate the average magnitude for this pair of frames
+                average_magnitude = np.mean(magnitude)
+                print("Average Magnitude:", average_magnitude)
 
-                # set value according to the normalized magnitude of optical flow
-                hsv[..., 2] = cv2.normalize(
-                    magnitude, None, 0.0, 1.0, cv2.NORM_MINMAX, -1,
-                )
-
-                # multiply each pixel value to 255
-                hsv_8u = np.uint8(hsv * 255.0)
-
-                # convert hsv to bgr
-                bgr = cv2.cvtColor(hsv_8u, cv2.COLOR_HSV2BGR)
-
+                # Accumulate the total movement
+                total_movement += average_magnitude
+                
                 # update previous_frame value
                 previous_frame = current_frame
 
@@ -135,7 +126,7 @@ def farnebacks(video, device):
 
                 # visualization
                 cv2.imshow("original", frame)
-                cv2.imshow("result", bgr)
+                # cv2.imshow("result", bgr)
                 k = cv2.waitKey(1)
                 if k == 27:
                     break
@@ -234,35 +225,18 @@ def farnebacks(video, device):
                 gpu_flow_y = cv2.cuda_GpuMat(gpu_flow.size(), cv2.CV_32FC1)
                 cv2.cuda.split(gpu_flow, [gpu_flow_x, gpu_flow_y])
 
-                # convert from cartesian to polar coordinates to get magnitude and angle
-                gpu_magnitude, gpu_angle = cv2.cuda.cartToPolar(
-                    gpu_flow_x, gpu_flow_y, angleInDegrees=True,
-                )
+                # start post-process timer
+                start_post_time = time.time()
 
-                # set value to normalized magnitude from 0 to 1
-                gpu_v = cv2.cuda.normalize(gpu_magnitude, 0.0, 1.0, cv2.NORM_MINMAX, -1)
+                # Calculate the magnitude of optical flow vectors
+                magnitude = np.sqrt(gpu_flow_x.download() ** 2 + gpu_flow_y.download() ** 2)
 
-                # get angle of optical flow
-                angle = gpu_angle.download()
-                angle *= (1 / 360.0) * (180 / 255.0)
+                # Calculate the average magnitude for this pair of frames
+                average_magnitude = np.mean(magnitude)
+                print("Average Magnitude:", average_magnitude)
 
-                # set hue according to the angle of optical flow
-                gpu_h.upload(angle)
-
-                # merge h,s,v channels
-                cv2.cuda.merge([gpu_h, gpu_s, gpu_v], gpu_hsv)
-
-                # multiply each pixel value to 255
-                gpu_hsv.convertTo(cv2.CV_8U, 255.0, gpu_hsv_8u, 0.0)
-
-                # convert hsv to bgr
-                gpu_bgr = cv2.cuda.cvtColor(gpu_hsv_8u, cv2.COLOR_HSV2BGR)
-
-                # send original frame from GPU back to CPU
-                frame = gpu_frame.download()
-
-                # send result from GPU back to CPU
-                bgr = gpu_bgr.download()
+                # Accumulate the total movement
+                total_movement += average_magnitude
 
                 # update previous_frame value
                 gpu_previous = gpu_current
@@ -281,7 +255,6 @@ def farnebacks(video, device):
 
                 # visualization
                 cv2.imshow("original", frame)
-                cv2.imshow("result", bgr)
                 k = cv2.waitKey(1)
                 if k == 27:
                     break
